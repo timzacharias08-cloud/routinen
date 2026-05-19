@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#7c5cff"/>
+      <stop offset="100%" stop-color="#5eead4"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <g fill="none" stroke="#fff" stroke-width="28" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Checkliste -->
+    <rect x="120" y="120" width="272" height="272" rx="36" stroke-opacity="0.35"/>
+    <!-- Hakerl 1 -->
+    <path d="M170 200 l32 32 l64 -72"/>
+    <line x1="290" y1="220" x2="370" y2="220" stroke-opacity="0.85"/>
+    <!-- Hakerl 2 -->
+    <path d="M170 290 l32 32 l64 -72"/>
+    <line x1="290" y1="310" x2="370" y2="310" stroke-opacity="0.85"/>
+    <!-- Leerer Punkt -->
+    <circle cx="186" cy="390" r="18" stroke-opacity="0.85"/>
+    <line x1="220" y1="390" x2="370" y2="390" stroke-opacity="0.5"/>
+  </g>
+</svg>

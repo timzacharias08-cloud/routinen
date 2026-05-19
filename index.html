@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no" />
+  <meta name="theme-color" content="#0b0f1a" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Routinen" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="icon-180.png" />
+  <link rel="icon" type="image/svg+xml" href="icon.svg" />
+  <link rel="stylesheet" href="styles.css" />
+  <title>Routinen</title>
+</head>
+<body>
+  <div class="app" id="app">
+
+    <header class="topbar">
+      <div class="topbar-left">
+        <h1 id="dateTitle">Heute</h1>
+        <p id="dateSub" class="muted"></p>
+      </div>
+      <div class="topbar-right">
+        <button class="icon-btn" id="navPrevDay" aria-label="Vorheriger Tag">‹</button>
+        <button class="icon-btn" id="navToday" aria-label="Heute">●</button>
+        <button class="icon-btn" id="navNextDay" aria-label="N&auml;chster Tag">›</button>
+      </div>
+    </header>
+
+    <nav class="tabs" role="tablist">
+      <button class="tab active" data-tab="today" role="tab">Heute</button>
+      <button class="tab" data-tab="week" role="tab">Woche</button>
+      <button class="tab" data-tab="stats" role="tab">Statistik</button>
+      <button class="tab" data-tab="manage" role="tab">Routinen</button>
+    </nav>
+
+    <main class="content">
+
+      <!-- TAB: HEUTE -->
+      <section class="tab-panel active" data-panel="today">
+        <div class="progress-card">
+          <div class="progress-info">
+            <span id="progressText">0 / 0 erledigt</span>
+            <span id="progressPercent" class="muted">0%</span>
+          </div>
+          <div class="progress-bar"><div id="progressFill" class="progress-fill"></div></div>
+        </div>
+
+        <div id="todayGroups"></div>
+
+        <div class="card note-card">
+          <label for="dayNote" class="card-title">Notiz f&uuml;r diesen Tag</label>
+          <textarea id="dayNote" placeholder="Stimmung, Gedanken, Highlights &hellip;"></textarea>
+        </div>
+
+        <div id="todayEmpty" class="empty hidden">
+          <p>Noch keine Routinen f&uuml;r diesen Wochentag.</p>
+          <button class="btn primary" data-goto-tab="manage">Routine anlegen</button>
+        </div>
+      </section>
+
+      <!-- TAB: WOCHE -->
+      <section class="tab-panel" data-panel="week">
+        <div class="card">
+          <div class="card-title">Diese Woche</div>
+          <div id="weekStrip" class="week-strip"></div>
+        </div>
+        <div class="card">
+          <div class="card-title">Letzte 12 Wochen</div>
+          <div id="heatmap" class="heatmap"></div>
+          <div class="heatmap-legend muted">
+            <span>weniger</span>
+            <span class="hm-cell hm-0"></span>
+            <span class="hm-cell hm-1"></span>
+            <span class="hm-cell hm-2"></span>
+            <span class="hm-cell hm-3"></span>
+            <span class="hm-cell hm-4"></span>
+            <span>mehr</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB: STATISTIK -->
+      <section class="tab-panel" data-panel="stats">
+        <div class="stat-grid">
+          <div class="stat-card">
+            <div class="stat-value" id="statTotalRoutines">0</div>
+            <div class="stat-label">Routinen</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="statLongestStreak">0</div>
+            <div class="stat-label">L&auml;ngster Streak</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="statPerfectDays">0</div>
+            <div class="stat-label">Perfekte Tage</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="statTotalDone">0</div>
+            <div class="stat-label">Erledigt gesamt</div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">Streaks pro Routine</div>
+          <div id="streakList"></div>
+        </div>
+      </section>
+
+      <!-- TAB: ROUTINEN VERWALTEN -->
+      <section class="tab-panel" data-panel="manage">
+        <button class="btn primary block" id="btnAddRoutine">+ Neue Routine</button>
+        <div id="routineList"></div>
+
+        <details class="card">
+          <summary class="card-title">Daten</summary>
+          <div class="data-actions">
+            <button class="btn" id="btnExport">Daten exportieren</button>
+            <button class="btn" id="btnImport">Daten importieren</button>
+            <input type="file" id="importFile" accept="application/json" hidden />
+            <button class="btn danger" id="btnReset">Alles zur&uuml;cksetzen</button>
+          </div>
+        </details>
+      </section>
+    </main>
+
+    <!-- Modal: Routine bearbeiten / anlegen -->
+    <div class="modal hidden" id="routineModal" role="dialog" aria-modal="true">
+      <div class="modal-backdrop" data-close-modal></div>
+      <div class="modal-sheet">
+        <div class="modal-header">
+          <h2 id="modalTitle">Neue Routine</h2>
+          <button class="icon-btn" data-close-modal aria-label="Schlie&szlig;en">✕</button>
+        </div>
+        <div class="modal-body">
+          <label class="field">
+            <span>Name</span>
+            <input type="text" id="fName" placeholder="z.B. Wasser trinken" maxlength="60" />
+          </label>
+
+          <label class="field">
+            <span>Typ</span>
+            <select id="fType">
+              <option value="checkbox">Abhaken</option>
+              <option value="counter">Z&auml;hler (z.B. 8 x t&auml;glich)</option>
+            </select>
+          </label>
+
+          <label class="field hidden" id="fTargetWrap">
+            <span>Ziel pro Tag</span>
+            <input type="number" id="fTarget" min="1" max="99" value="8" />
+          </label>
+
+          <label class="field">
+            <span>Tageszeit</span>
+            <select id="fTime">
+              <option value="morning">Morgen</option>
+              <option value="noon">Mittag</option>
+              <option value="evening">Abend</option>
+              <option value="anytime">Jederzeit</option>
+            </select>
+          </label>
+
+          <div class="field">
+            <span>Wochentage</span>
+            <div class="weekday-picker" id="fWeekdays">
+              <button type="button" data-wd="1">Mo</button>
+              <button type="button" data-wd="2">Di</button>
+              <button type="button" data-wd="3">Mi</button>
+              <button type="button" data-wd="4">Do</button>
+              <button type="button" data-wd="5">Fr</button>
+              <button type="button" data-wd="6">Sa</button>
+              <button type="button" data-wd="0">So</button>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn danger ghost hidden" id="btnDeleteRoutine">L&ouml;schen</button>
+          <button class="btn primary" id="btnSaveRoutine">Speichern</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Install-Hinweis f&uuml;r iOS -->
+    <div class="install-hint hidden" id="installHint">
+      <div class="install-hint-inner">
+        <strong>Tipp:</strong> Tippe auf <span class="ios-share">⬆︎</span> und w&auml;hle <em>&bdquo;Zum Home-Bildschirm&ldquo;</em>, um die App zu installieren.
+        <button class="icon-btn" id="dismissInstall" aria-label="Schlie&szlig;en">✕</button>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="app.js" defer></script>
+</body>
+</html>
