@@ -1,0 +1,20 @@
+{
+  "name": "Top News – Deine wichtigsten Nachrichten",
+  "short_name": "Top News",
+  "description": "Die 3–10 wichtigsten Nachrichten des Tages aus mehreren deutschen Quellen.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0b1120",
+  "theme_color": "#0f172a",
+  "lang": "de",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
