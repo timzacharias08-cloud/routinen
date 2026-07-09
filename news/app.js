@@ -14,7 +14,6 @@ const FEEDS = [
   { name: 'Tagesschau Inland',     cat: 'politik',    prio: 2, url: 'https://www.tagesschau.de/inland/index~rss2.xml' },
   { name: 'Tagesschau Ausland',    cat: 'politik',    prio: 2, url: 'https://www.tagesschau.de/ausland/index~rss2.xml' },
   { name: 'Tagesschau Wirtschaft', cat: 'wirtschaft', prio: 2, url: 'https://www.tagesschau.de/wirtschaft/index~rss2.xml' },
-  { name: 'Spiegel Wirtschaft',    cat: 'wirtschaft', prio: 1, url: 'https://www.spiegel.de/wirtschaft/index.rss' },
   { name: 'finanzen.net',          cat: 'aktien',     prio: 1, url: 'https://www.finanzen.net/rss/news' },
 ];
 
@@ -137,8 +136,9 @@ try {
   if (p >= 0 && p < PROXIES.length) preferredProxy = p;
 } catch {}
 
-const HEDGE_MS = 2200;      // so lange auf den laufenden Proxy warten, bevor der nächste dazugeschaltet wird
+const HEDGE_MS = 1400;      // so lange auf den laufenden Proxy warten, bevor der nächste dazugeschaltet wird
 const PROXY_TIMEOUT = 9000; // harte Obergrenze pro Proxy-Versuch
+const DIRECT_TIMEOUT = 5000;
 
 async function fetchOnce(url) {
   const res = await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout(PROXY_TIMEOUT) });
@@ -146,6 +146,35 @@ async function fetchOnce(url) {
   const text = await res.text();
   if (!text || text.length < 80) throw new Error('leere Antwort');
   return text;
+}
+
+// Manche Quellen (z. B. Tagesschau) erlauben CORS und sind ohne Proxy DIREKT ladbar –
+// das ist um ein Vielfaches schneller. Welche Hosts das können, wird zur Laufzeit gelernt.
+const directHosts = new Map([['www.tagesschau.de', true]]); // verifiziert direkt ladbar
+function hostOf(url) { try { return new URL(url).host; } catch { return ''; } }
+
+async function fetchDirect(url) {
+  const res = await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout(DIRECT_TIMEOUT) });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  const text = await res.text();
+  if (!text || text.length < 80) throw new Error('leere Antwort');
+  return text;
+}
+
+// Bevorzugt Direktzugriff, fällt sonst auf den (hedged) Proxy-Weg zurück.
+async function fetchText(url) {
+  const host = hostOf(url);
+  const known = directHosts.get(host);
+  if (known !== false) {                 // bekannt-direkt oder noch unbekannt → direkt versuchen
+    try {
+      const t = await fetchDirect(url);
+      directHosts.set(host, true);
+      return t;
+    } catch {
+      if (known === undefined) directHosts.set(host, false); // unbekannt & gescheitert → künftig Proxy
+    }
+  }
+  return fetchViaProxy(url);
 }
 
 // "Hedged request": Proxies werden in bevorzugter Reihenfolge gestartet, aber nicht
@@ -180,7 +209,7 @@ function fetchViaProxy(url) {
   });
 }
 async function fetchJsonViaProxy(url) {
-  return JSON.parse(await fetchViaProxy(url));
+  return JSON.parse(await fetchText(url));
 }
 
 function parseFeed(xmlText, feed) {
@@ -237,7 +266,7 @@ function companyToken(name) {
 
 async function fetchAllFeeds(feeds) {
   const results = await Promise.allSettled(
-    feeds.map((f) => fetchViaProxy(f.url).then((xml) => parseFeed(xml, f)))
+    feeds.map((f) => fetchText(f.url).then((xml) => parseFeed(xml, f)))
   );
   const all = [];
   results.forEach((r) => { if (r.status === 'fulfilled') all.push(...r.value); });
@@ -658,18 +687,16 @@ async function loadStock(symbol, name) {
     el.stockContent.innerHTML = '<div class="skeletons"><div class="skel"></div><div class="skel"></div><div class="skel"></div></div>';
   }
 
-  // Chart, KGV-Historie und Nachrichten parallel laden – jedes darf einzeln scheitern
-  const [chartR, peR, newsR] = await Promise.allSettled([
+  // Kurs & KGV-Historie parallel laden – jedes darf einzeln scheitern
+  const [chartR, peR] = await Promise.allSettled([
     fetchJsonViaProxy(YQ.chart(symbol)),
     fetchJsonViaProxy(YQ.pe(symbol)),
-    fetchViaProxy(YQ.news(symbol)).then((xml) =>
-      parseFeed(xml, { name: 'Yahoo Finance', cat: 'aktien', prio: 1 })),
   ]);
   if (seq !== stockLoadSeq) return; // Nutzer hat inzwischen andere Aktie gewählt
 
   const chart = chartR.status === 'fulfilled' ? chartR.value?.chart?.result?.[0] : null;
   const peSeries = peR.status === 'fulfilled' ? parsePeSeries(peR.value) : [];
-  let stockNews = newsR.status === 'fulfilled' ? newsR.value : [];
+  let stockNews = [];
 
   if (!chart) {
     el.stockContent.innerHTML = `<div class="status error">Kursdaten für „${escapeHtml(name)}" konnten nicht geladen werden. Prüfe deine Verbindung und versuch es erneut.</div>`;
@@ -689,6 +716,7 @@ async function loadStock(symbol, name) {
   }
 
   // Nachrichten aus den bereits geladenen Feeds ergänzen, die die Firma erwähnen
+  if (!feedItemsCache.items.length) { try { await getFeedItems(false); } catch {} if (seq !== stockLoadSeq) return; }
   const token = companyToken(name);
   for (const it of feedItemsCache.items) {
     if (mentionsCompany(it.title + ' ' + (it.desc || ''), token)) stockNews.push(it);
@@ -1026,8 +1054,9 @@ async function loadTopMoves(force = false) {
 
     renderTopMoves(top, idxChg);
 
-    // Erklärungen nachladen (parallel, jede darf scheitern)
-    await Promise.allSettled(top.map((m) => explainMove(m, idxChg)));
+    // Für die Erklärungen die geladenen Feeds nutzen – falls noch nicht da, kurz holen
+    if (!feedItemsCache.items.length) { try { await getFeedItems(false); } catch {} }
+    top.forEach((m) => explainMove(m, idxChg));
   } catch (e) {
     box.innerHTML = `<div class="moves-error">Top Moves konnten nicht geladen werden (${escapeHtml(e.message)}). Über ⟳ oben erneut versuchen.</div>`;
     movesLoadedAt = 0;
@@ -1058,18 +1087,10 @@ async function explainMove(m, idxChg) {
 
   const token = companyToken(m.name);
 
-  // 1) Zuerst die bereits geladenen Feeds durchsuchen (kein Netz!) – finanzen.net
-  //    nennt häufig einzelne Aktien namentlich. Nur ganze Wörter zählen.
-  let items = feedItemsCache.items.filter((it) =>
+  // Die bereits geladenen Feeds durchsuchen (kein Netz!) – finanzen.net nennt häufig
+  // einzelne Aktien namentlich. Nur ganze Wörter zählen.
+  const items = feedItemsCache.items.filter((it) =>
     mentionsCompany(it.title + ' ' + (it.desc || ''), token));
-
-  // 2) Nur wenn dort nichts passt: Yahoo-Schlagzeilen versuchen (best effort)
-  if (!items.length) {
-    try {
-      items = await fetchViaProxy(YQ.news(m.symbol)).then((xml) =>
-        parseFeed(xml, { name: 'Yahoo Finance', cat: 'aktien', prio: 1 }));
-    } catch {}
-  }
 
   // Nur frische Meldungen (letzte 4 Tage); passende Stimmung bevorzugen
   const fresh = items.filter((n) => n.date && Date.now() - n.date.getTime() < 4 * 24 * 3.6e6);
