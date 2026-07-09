@@ -8,6 +8,11 @@
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="icon.svg" />
+  <!-- Verbindungen zu den Datenquellen früh aufbauen (TLS-Handshake vorziehen) -->
+  <link rel="preconnect" href="https://corsproxy.io" crossorigin />
+  <link rel="preconnect" href="https://api.allorigins.win" crossorigin />
+  <link rel="preconnect" href="https://query1.finance.yahoo.com" crossorigin />
+  <link rel="dns-prefetch" href="https://api.codetabs.com" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>

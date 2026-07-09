@@ -130,24 +130,57 @@ function loadJson(key) {
 function clamp(n, lo, hi) { return Math.max(lo, Math.min(hi, Number(n) || lo)); }
 
 // ---------- Fetch helpers ----------
-async function fetchViaProxy(url) {
-  let lastErr;
-  for (const build of PROXIES) {
-    try {
-      const res = await fetch(build(url), { cache: 'no-store', signal: AbortSignal.timeout(12000) });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      const text = await res.text();
-      if (text && text.length > 80) return text;
-      throw new Error('leere Antwort');
-    } catch (e) {
-      lastErr = e;
-    }
-  }
-  throw lastErr || new Error('Alle Proxies fehlgeschlagen');
+// Merkt sich sitzungsübergreifend, welcher Proxy zuletzt schnell war → zuerst probieren.
+let preferredProxy = 0;
+try {
+  const p = parseInt(localStorage.getItem('topnews:proxy'), 10);
+  if (p >= 0 && p < PROXIES.length) preferredProxy = p;
+} catch {}
+
+const HEDGE_MS = 2200;      // so lange auf den laufenden Proxy warten, bevor der nächste dazugeschaltet wird
+const PROXY_TIMEOUT = 9000; // harte Obergrenze pro Proxy-Versuch
+
+async function fetchOnce(url) {
+  const res = await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout(PROXY_TIMEOUT) });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  const text = await res.text();
+  if (!text || text.length < 80) throw new Error('leere Antwort');
+  return text;
+}
+
+// "Hedged request": Proxies werden in bevorzugter Reihenfolge gestartet, aber nicht
+// erst nach vollem Timeout – nach HEDGE_MS (oder sofort bei Fehler) kommt der nächste
+// dazu. Der erste Erfolg gewinnt: kurze Latenz bei gesundem Proxy, schnelles Failover.
+function fetchViaProxy(url) {
+  const order = PROXIES.map((_, i) => (preferredProxy + i) % PROXIES.length);
+  return new Promise((resolve, reject) => {
+    let settled = false, started = 0, failures = 0, timer = null;
+    const clearTimer = () => { if (timer) { clearTimeout(timer); timer = null; } };
+
+    const startNext = () => {
+      if (settled || started >= order.length) return;
+      const idx = order[started++];
+      clearTimer();
+      if (started < order.length) timer = setTimeout(startNext, HEDGE_MS);
+      fetchOnce(PROXIES[idx](url)).then((text) => {
+        if (settled) return;
+        settled = true; clearTimer();
+        if (idx !== preferredProxy) {
+          preferredProxy = idx;
+          try { localStorage.setItem('topnews:proxy', String(idx)); } catch {}
+        }
+        resolve(text);
+      }).catch(() => {
+        if (settled) return;
+        if (++failures >= order.length) { settled = true; clearTimer(); reject(new Error('Alle Proxies fehlgeschlagen')); return; }
+        clearTimer(); startNext(); // bei frühem Fehler sofort weiter statt auf HEDGE_MS zu warten
+      });
+    };
+    startNext();
+  });
 }
 async function fetchJsonViaProxy(url) {
-  const t = await fetchViaProxy(url);
-  return JSON.parse(t);
+  return JSON.parse(await fetchViaProxy(url));
 }
 
 function parseFeed(xmlText, feed) {
@@ -181,6 +214,12 @@ function stripHtml(s) {
   d.innerHTML = s;
   return (d.textContent || '').replace(/\s+/g, ' ');
 }
+function escapeRegex(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+// Prüft, ob ein Firmenname als GANZES Wort vorkommt (verhindert z. B. "Meta" in "Metall").
+function mentionsCompany(text, token) {
+  if (!token || token.length < 3) return false;
+  return new RegExp('(^|[^0-9a-zà-ÿ])' + escapeRegex(token) + '([^0-9a-zà-ÿ]|$)', 'i').test(text);
+}
 
 async function fetchAllFeeds(feeds) {
   const results = await Promise.allSettled(
@@ -189,6 +228,28 @@ async function fetchAllFeeds(feeds) {
   const all = [];
   results.forEach((r) => { if (r.status === 'fulfilled') all.push(...r.value); });
   return all;
+}
+
+// Gemeinsamer In-Memory-Cache aller Feed-Items: News, Ticker und die Top-Moves-
+// Erklärungen teilen sich EINEN Abruf. Parallele Aufrufe teilen dieselbe Anfrage.
+let feedItemsCache = { items: [], ts: 0 };
+let feedItemsInflight = null;
+const FEED_TTL = 90 * 1000;
+
+function getFeedItems(force = false) {
+  const fresh = feedItemsCache.items.length && Date.now() - feedItemsCache.ts < FEED_TTL;
+  if (!force && fresh) return Promise.resolve(feedItemsCache.items);
+  if (feedItemsInflight) return feedItemsInflight;
+  feedItemsInflight = fetchAllFeeds(FEEDS).then((items) => {
+    feedItemsInflight = null;
+    if (items.length) feedItemsCache = { items, ts: Date.now() };
+    return items.length ? items : feedItemsCache.items;
+  }).catch((e) => {
+    feedItemsInflight = null;
+    if (feedItemsCache.items.length) return feedItemsCache.items; // Offline: alte Items behalten
+    throw e;
+  });
+  return feedItemsInflight;
 }
 
 // ---------- Ranking & dedup ----------
@@ -355,9 +416,6 @@ async function loadNews(useCacheFirst = false) {
   loading = true;
   el.refreshBtn.classList.add('spin');
 
-  const activeFeeds = FEEDS.filter((f) => settings.topics.includes(f.cat));
-  if (!activeFeeds.length) activeFeeds.push(...FEEDS);
-
   if (useCacheFirst) {
     const cached = readCache();
     if (cached) { render(cached.clusters); setUpdated(cached.ts, true); }
@@ -368,7 +426,9 @@ async function loadNews(useCacheFirst = false) {
   }
 
   try {
-    const all = await fetchAllFeeds(activeFeeds);
+    const items = await getFeedItems(!useCacheFirst);
+    const filtered = items.filter((it) => settings.topics.includes(it.cat));
+    const all = filtered.length ? filtered : items;
 
     if (!all.length) {
       const cached = readCache();
@@ -423,13 +483,13 @@ function readCache() {
 
 // ---------- Live-Ticker ----------
 let tickerLoading = false;
-async function loadTicker() {
+async function loadTicker(force = false) {
   if (tickerLoading) return;
   tickerLoading = true;
   if (!el.tickerList.children.length) showSkeletons(el.tickerSkeletons, true, 6);
 
   try {
-    const all = await fetchAllFeeds(FEEDS);
+    const all = await getFeedItems(force);
     const dated = all.filter((it) => it.date).sort((a, b) => b.date - a.date).slice(0, 40);
     renderTicker(dated);
     el.tickerUpdated.textContent = 'aktualisiert ' + clockTime(new Date()) + ' Uhr · Auto-Update alle 90 s';
@@ -465,7 +525,7 @@ function renderTicker(items) {
 function startTickerTimer() {
   stopTickerTimer();
   tickerTimer = setInterval(() => {
-    if (document.visibilityState === 'visible' && currentView === 'ticker') loadTicker();
+    if (document.visibilityState === 'visible' && currentView === 'ticker') loadTicker(true);
   }, 90 * 1000);
 }
 function stopTickerTimer() {
@@ -515,15 +575,25 @@ async function searchStocks(q) {
   } catch { return []; }
 }
 
+const stockCache = new Map(); // symbol → { name, points, stockNews, analysis, meta, ts }
+
 async function loadStock(symbol, name) {
   const seq = ++stockLoadSeq;
   currentStock = { symbol, name };
   localStorage.setItem(STOCK_KEY, JSON.stringify(currentStock));
   el.stockContent.dataset.loaded = '1';
-  el.stockContent.innerHTML = '<div class="skeletons"><div class="skel"></div><div class="skel"></div><div class="skel"></div></div>';
   markQuickActive();
   const movesBox = $('topMovesBox');
   if (movesBox) movesBox.open = false; // Platz für die Analyse machen
+
+  // Stale-while-revalidate: bereits geladene Aktie sofort anzeigen, dann im Hintergrund frisch holen
+  const cachedStock = stockCache.get(symbol);
+  if (cachedStock) {
+    renderStock(symbol, cachedStock.name, cachedStock.points, cachedStock.stockNews, cachedStock.analysis, cachedStock.meta);
+    el.stockContent.scrollIntoView({ block: 'nearest' });
+  } else {
+    el.stockContent.innerHTML = '<div class="skeletons"><div class="skel"></div><div class="skel"></div><div class="skel"></div></div>';
+  }
 
   // Chart, KGV-Historie und Nachrichten parallel laden – jedes darf einzeln scheitern
   const [chartR, peR, newsR] = await Promise.allSettled([
@@ -555,17 +625,11 @@ async function loadStock(symbol, name) {
     return;
   }
 
-  // Nachrichten aus den allgemeinen Feeds ergänzen, die die Firma erwähnen
-  const token = name.toLowerCase().replace(/\s+(ag|se|inc\.?|corp\.?|co\.?|plc)\b.*$/i, '').trim();
-  try {
-    const cached = readCache();
-    if (cached) {
-      for (const cl of cached.clusters) {
-        const t = (cl.lead.title + ' ' + (cl.lead.desc || '')).toLowerCase();
-        if (token.length > 2 && t.includes(token)) stockNews.push(cl.lead);
-      }
-    }
-  } catch {}
+  // Nachrichten aus den bereits geladenen Feeds ergänzen, die die Firma erwähnen
+  const token = name.toLowerCase().replace(/\s+(ag|se|inc\.?|corp\.?|co\.?|plc|group)\b.*$/i, '').trim();
+  for (const it of feedItemsCache.items) {
+    if (mentionsCompany(it.title + ' ' + (it.desc || ''), token)) stockNews.push(it);
+  }
   // Duplikate raus, auf 8 begrenzen, neueste zuerst
   const seen = new Set();
   stockNews = stockNews.filter((n) => {
@@ -576,7 +640,9 @@ async function loadStock(symbol, name) {
   }).sort((a, b) => (b.date || 0) - (a.date || 0)).slice(0, 8);
 
   const analysis = analyzeStock(points, peSeries, stockNews);
-  renderStock(symbol, name, points, stockNews, analysis, chart.meta || {});
+  const meta = chart.meta || {};
+  stockCache.set(symbol, { name, points, stockNews, analysis, meta, ts: Date.now() });
+  renderStock(symbol, name, points, stockNews, analysis, meta);
 }
 
 // KGV-Zeitreihe aus Yahoo-Antwort extrahieren → [{t: Date, v: number}]
@@ -913,22 +979,20 @@ async function explainMove(m, idxChg) {
   const target = $('reason-' + cssId(m.symbol));
   if (!target) return;
 
-  // Symbol-News von Yahoo + Treffer aus den bereits geladenen deutschen Feeds
-  let items = [];
-  try {
-    items = await fetchViaProxy(YQ.news(m.symbol)).then((xml) =>
-      parseFeed(xml, { name: 'Yahoo Finance', cat: 'aktien', prio: 1 }));
-  } catch {}
-  try {
-    const cached = readCache();
-    if (cached) {
-      const token = m.name.toLowerCase();
-      for (const cl of cached.clusters) {
-        const t = (cl.lead.title + ' ' + (cl.lead.desc || '')).toLowerCase();
-        if (t.includes(token)) items.push(cl.lead);
-      }
-    }
-  } catch {}
+  const token = m.name.toLowerCase().replace(/\s+(ag|se|inc\.?|corp\.?|co\.?|plc|group)\b.*$/i, '').trim();
+
+  // 1) Zuerst die bereits geladenen Feeds durchsuchen (kein Netz!) – finanzen.net
+  //    nennt häufig einzelne Aktien namentlich. Nur ganze Wörter zählen.
+  let items = feedItemsCache.items.filter((it) =>
+    mentionsCompany(it.title + ' ' + (it.desc || ''), token));
+
+  // 2) Nur wenn dort nichts passt: Yahoo-Schlagzeilen versuchen (best effort)
+  if (!items.length) {
+    try {
+      items = await fetchViaProxy(YQ.news(m.symbol)).then((xml) =>
+        parseFeed(xml, { name: 'Yahoo Finance', cat: 'aktien', prio: 1 }));
+    } catch {}
+  }
 
   // Nur frische Meldungen (letzte 4 Tage); passende Stimmung bevorzugen
   const fresh = items.filter((n) => n.date && Date.now() - n.date.getTime() < 4 * 24 * 3.6e6);
@@ -1045,7 +1109,7 @@ function closeSettings() { el.overlay.hidden = true; loadNews(); }
 // ---------- Events ----------
 el.refreshBtn.addEventListener('click', () => {
   if (currentView === 'news') loadNews(false);
-  else if (currentView === 'ticker') loadTicker();
+  else if (currentView === 'ticker') loadTicker(true);
   else if (currentView === 'stock') {
     loadTopMoves(true);
     if (currentStock) loadStock(currentStock.symbol, currentStock.name);
@@ -1075,7 +1139,7 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
     const cached = readCache();
     if (!cached || Date.now() - cached.ts > 10 * 60 * 1000) loadNews(true);
-    if (currentView === 'ticker') loadTicker();
+    if (currentView === 'ticker') loadTicker(true);
   }
 });
 

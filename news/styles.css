@@ -50,6 +50,22 @@ html, body {
 body {
   min-height: 100vh;
   padding-bottom: calc(78px + env(safe-area-inset-bottom));
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior-y: contain;
+}
+
+/* Lange Listen nur rendern, was sichtbar ist → flüssigeres Scrollen */
+.ticker-item { content-visibility: auto; contain-intrinsic-size: auto 72px; }
+.news-card   { content-visibility: auto; contain-intrinsic-size: auto 120px; }
+
+/* Nutzer mit "reduzierte Bewegung" bekommen keine Animationen */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /* ---------- Top bar ---------- */
