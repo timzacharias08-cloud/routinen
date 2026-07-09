@@ -525,6 +525,40 @@ body {
 .procon-col.con li { border-left-color: var(--down); }
 .procon-col .none { border-left-color: var(--border); color: var(--text-faint); font-style: italic; }
 
+/* Chancen aus den News */
+.opp-list { list-style: none; display: flex; flex-direction: column; gap: 9px; }
+.opp-list li {
+  position: relative;
+  padding: 10px 12px 10px 34px;
+  border-radius: 10px;
+  background: var(--up-soft);
+  border: 1px solid color-mix(in srgb, var(--up) 30%, var(--border));
+  line-height: 1.45;
+}
+.opp-list li::before {
+  content: '💡';
+  position: absolute;
+  left: 10px; top: 9px;
+  font-size: 0.95rem;
+}
+.opp-list li.opp-none {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  color: var(--text-faint);
+  font-size: 0.85rem;
+}
+.opp-list li.opp-none::before { content: '🔍'; }
+.opp-text { display: block; font-size: 0.9rem; font-weight: 600; color: var(--text); }
+.opp-src {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.76rem;
+  color: var(--text-dim);
+  text-decoration: none;
+}
+.opp-src:hover { color: var(--accent); text-decoration: underline; }
+.opp-hint { margin-top: 10px; font-size: 0.76rem; color: var(--text-faint); line-height: 1.5; }
+
 /* KGV */
 .kgv-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 .kgv-box {

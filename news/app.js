@@ -220,6 +220,20 @@ function mentionsCompany(text, token) {
   if (!token || token.length < 3) return false;
   return new RegExp('(^|[^0-9a-zà-ÿ])' + escapeRegex(token) + '([^0-9a-zà-ÿ]|$)', 'i').test(text);
 }
+// Leitet aus einem (evtl. langen) Firmennamen das Marken-Kürzel ab, das in Schlagzeilen
+// tatsächlich benutzt wird: "Meta Platforms, Inc." → "meta", "Volkswagen AG" → "volkswagen".
+const GENERIC_FIRST = ['deutsche', 'deutscher', 'münchener', 'muenchener', 'hannover', 'heidelberg', 'vereinigte', 'erste'];
+function companyToken(name) {
+  const cleaned = (name || '').toLowerCase()
+    .replace(/[.,]/g, ' ')
+    .replace(/\b(ag|se|inc|incorporated|corp|corporation|co|plc|group|holding|holdings|nv|sa|spa|the|platforms)\b/g, ' ')
+    .replace(/\s+/g, ' ').trim();
+  const words = cleaned.split(' ').filter(Boolean);
+  if (!words.length) return (name || '').toLowerCase().trim();
+  // Generische Anfangswörter ("Deutsche …") sind allein zu unspezifisch → zweites Wort dazu
+  if (GENERIC_FIRST.includes(words[0]) && words[1]) return words[0] + ' ' + words[1];
+  return words[0];
+}
 
 async function fetchAllFeeds(feeds) {
   const results = await Promise.allSettled(
@@ -565,6 +579,55 @@ function sentimentOf(item) {
   return 'neu';
 }
 
+// ---------- Aktien: Chancen aus den News ableiten ----------
+// Ordnet Meldungen anhand von Stichwörtern konkreten Chancen-Themen zu.
+const OPPORTUNITY_RULES = [
+  { cat: 'auftrag',   words: ['großauftrag', 'milliardenauftrag', 'auftragsplus', 'auftragseingang', 'auftragsbücher', 'neuer auftrag', 'aufträge', 'auftrag von', 'order'],
+    text: 'Neue Aufträge könnten Umsatz und Gewinn ankurbeln.' },
+  { cat: 'ki',        words: ['künstliche intelligenz', 'ki-', 'ki ', ' ai ', 'ai-', 'rechenzentrum', 'cloud', 'halbleiter', 'chip', 'data center'],
+    text: 'Nachfrage rund um KI, Cloud und Chips bietet Wachstumspotenzial.' },
+  { cat: 'upgrade',   words: ['kaufempfehlung', 'hochgestuft', 'hochstufung', 'kursziel erhöht', 'kursziel angehoben', 'outperform', 'overweight', 'upgrade', 'zum kauf'],
+    text: 'Analysten sehen Aufwärtspotenzial (Kaufempfehlung oder höheres Kursziel).' },
+  { cat: 'expansion', words: ['übernahme', 'übernimmt', 'fusion', 'expansion', 'akquisition', 'markteintritt', 'beteiligung', 'investiert', 'baut werk', 'neues werk'],
+    text: 'Wachstum durch Expansion, Investitionen oder Übernahmen möglich.' },
+  { cat: 'zahlen',    words: ['rekord', 'gewinnsprung', 'übertrifft', 'übertroffen', 'umsatzplus', 'milliardengewinn', 'prognose angehoben', 'prognose erhöht', 'starke zahlen', 'gewinn steigt'],
+    text: 'Starke Geschäftszahlen könnten den Kurs weiter stützen.' },
+  { cat: 'kosten',    words: ['sparprogramm', 'sparmaßnahmen', 'sparmassnahmen', 'restrukturierung', 'kostensenkung', 'effizienz', 'stellenabbau', 'umbau', 'sparkurs'],
+    text: 'Kostensenkungen könnten die Gewinnmargen mittelfristig verbessern.' },
+  { cat: 'ausschuett', words: ['dividende', 'aktienrückkauf', 'rückkauf', 'ausschüttung'],
+    text: 'Höhere Ausschüttungen oder Aktienrückkäufe können den Kurs stützen.' },
+  { cat: 'produkt',   words: ['zulassung', 'markteinführung', 'neues modell', 'patent', 'durchbruch', 'studie', 'produktstart', 'neue plattform'],
+    text: 'Neue Produkte oder Zulassungen könnten zusätzliche Umsätze bringen.' },
+];
+
+function deriveOpportunities(news, an) {
+  const used = new Set();
+  const out = [];
+  for (const it of news) {
+    if (out.length >= 4) break;
+    const t = (it.title + ' ' + (it.desc || '')).toLowerCase();
+    for (const rule of OPPORTUNITY_RULES) {
+      if (used.has(rule.cat)) continue;
+      if (rule.words.some((w) => t.includes(w))) {
+        used.add(rule.cat);
+        out.push({ text: rule.text, item: it });
+        break;
+      }
+    }
+  }
+  // Chancen aus Kurs-/Bewertungslage (nicht an eine einzelne Meldung gebunden)
+  if (out.length < 4 && an.chg6m <= -15) {
+    out.push({ text: `Nach dem Kursrückgang von ${fmtPct(an.chg6m)} in 6 Monaten ist die Aktie günstiger bewertet – für langfristig Orientierte eine mögliche Einstiegschance.` });
+  }
+  if (out.length < 4 && an.mom30 > 5 && an.nowP > an.sma50) {
+    out.push({ text: `Der intakte Aufwärtstrend (Momentum ${fmtPct(an.mom30)}) könnte sich fortsetzen.` });
+  }
+  if (out.length < 4 && an.peNow != null && an.pePast != null && an.peNow < an.pePast * 0.95) {
+    out.push({ text: `Das gesunkene KGV (von ${fmtNum(an.pePast)} auf ${fmtNum(an.peNow)}) macht die Aktie relativ günstiger als zuvor.` });
+  }
+  return out;
+}
+
 // ---------- Aktien: Daten laden ----------
 async function searchStocks(q) {
   try {
@@ -626,7 +689,7 @@ async function loadStock(symbol, name) {
   }
 
   // Nachrichten aus den bereits geladenen Feeds ergänzen, die die Firma erwähnen
-  const token = name.toLowerCase().replace(/\s+(ag|se|inc\.?|corp\.?|co\.?|plc|group)\b.*$/i, '').trim();
+  const token = companyToken(name);
   for (const it of feedItemsCache.items) {
     if (mentionsCompany(it.title + ' ' + (it.desc || ''), token)) stockNews.push(it);
   }
@@ -831,6 +894,14 @@ function renderStock(symbol, name, points, news, an, meta) {
     ? arr.map((p) => `<li>${escapeHtml(p)}</li>`).join('')
     : `<li class="none">${none}</li>`;
 
+  const opps = deriveOpportunities(news, an);
+  const oppHtml = opps.length ? opps.map((o) => `
+    <li>
+      <span class="opp-text">${escapeHtml(o.text)}</span>
+      ${o.item ? `<a class="opp-src" href="${escapeHtml(o.item.link)}" target="_blank" rel="noopener noreferrer">↳ ${escapeHtml(truncate(o.item.title, 90))} · ${escapeHtml(o.item.source)}</a>` : ''}
+    </li>`).join('')
+    : '<li class="opp-none">Aus den aktuellen Meldungen lässt sich derzeit keine klare Chance ableiten – beobachte die Nachrichtenlage.</li>';
+
   el.stockContent.innerHTML = `
     <div class="stock-block" style="animation-delay:0ms">
       <div class="stock-head">
@@ -879,6 +950,12 @@ function renderStock(symbol, name, points, news, an, meta) {
           <ul>${liHtml(an.cons, 'Keine negativen Signale gefunden.')}</ul>
         </div>
       </div>
+    </div>
+
+    <div class="stock-block" style="animation-delay:210ms">
+      <div class="block-title">🚀 Chancen aus den News</div>
+      <ul class="opp-list">${oppHtml}</ul>
+      <p class="opp-hint">Automatisch aus Nachrichten-Stichwörtern und der Kurslage abgeleitet – eine Chance ist keine Garantie, dass sie eintritt.</p>
     </div>
 
     <div class="stock-block" style="animation-delay:240ms">
@@ -979,7 +1056,7 @@ async function explainMove(m, idxChg) {
   const target = $('reason-' + cssId(m.symbol));
   if (!target) return;
 
-  const token = m.name.toLowerCase().replace(/\s+(ag|se|inc\.?|corp\.?|co\.?|plc|group)\b.*$/i, '').trim();
+  const token = companyToken(m.name);
 
   // 1) Zuerst die bereits geladenen Feeds durchsuchen (kein Netz!) – finanzen.net
   //    nennt häufig einzelne Aktien namentlich. Nur ganze Wörter zählen.
