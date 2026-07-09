@@ -1241,6 +1241,47 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
+// ---------- Sprach-Begrüßung ----------
+let greeted = false;
+
+function greetingText() {
+  const h = new Date().getHours();
+  const teil = h < 5 ? 'Guten Abend' : h < 11 ? 'Guten Morgen' : h < 18 ? 'Guten Tag' : 'Guten Abend';
+  return `${teil}, Herr Zacharias`;
+}
+
+function speakGreeting(force = false) {
+  if (!('speechSynthesis' in window)) return;
+  if (greeted && !force) return;
+  const u = new SpeechSynthesisUtterance(greetingText());
+  u.lang = 'de-DE';
+  u.rate = 0.98;
+  u.pitch = 1.0;
+  const de = speechSynthesis.getVoices().find((v) => /^de/i.test(v.lang));
+  if (de) u.voice = de;
+  u.onstart = () => { greeted = true; };
+  try { speechSynthesis.cancel(); speechSynthesis.speak(u); } catch {}
+}
+
+if ('speechSynthesis' in window) {
+  // Stimmen werden teils asynchron geladen – dann erneut versuchen, falls noch nicht begrüßt
+  speechSynthesis.addEventListener('voiceschanged', () => { if (!greeted) speakGreeting(); });
+  // Direktversuch beim Öffnen (klappt, wenn der Browser Audio ohne Geste erlaubt)
+  setTimeout(() => speakGreeting(), 500);
+  // Fallback: spätestens bei der ersten Berührung/Taste begrüßen (umgeht Autoplay-Sperre)
+  const onFirst = () => { speakGreeting(); };
+  window.addEventListener('pointerdown', onFirst, { once: true });
+  window.addEventListener('keydown', onFirst, { once: true });
+
+  // Tippen auf den App-Titel wiederholt die Begrüßung
+  const brand = document.querySelector('.brand');
+  if (brand) {
+    brand.style.cursor = 'pointer';
+    brand.title = 'Begrüßung anhören';
+    brand.addEventListener('click', () => speakGreeting(true));
+  }
+}
+
 // Service Worker
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
