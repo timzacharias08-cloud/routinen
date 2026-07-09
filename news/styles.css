@@ -339,6 +339,71 @@ body {
 
 .quick-chips { margin-bottom: 18px; }
 
+/* ---------- Aktien: Top Moves ---------- */
+.moves-box {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  margin-bottom: 16px;
+  overflow: hidden;
+}
+.moves-box summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 16px;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+}
+.moves-box summary::-webkit-details-marker { display: none; }
+.moves-title { font-size: 0.95rem; font-weight: 750; }
+.moves-sub { font-size: 0.75rem; font-weight: 550; color: var(--text-faint); margin-left: 6px; }
+.moves-chevron { color: var(--text-faint); transition: transform 0.2s; }
+.moves-box[open] .moves-chevron { transform: rotate(180deg); }
+
+.moves-body { border-top: 1px solid var(--border); }
+.moves-loading, .moves-error {
+  padding: 16px;
+  font-size: 0.85rem;
+  color: var(--text-faint);
+}
+.move-row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  padding: 12px 16px;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  transition: background 0.15s;
+  animation: rise 0.3s ease backwards;
+}
+.move-row:last-child { border-bottom: none; }
+.move-row:hover { background: var(--card-hover); }
+.move-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.move-name { font-size: 0.94rem; font-weight: 700; }
+.move-name .sym { font-size: 0.7rem; font-weight: 700; color: var(--text-faint); margin-left: 6px; }
+.move-reason {
+  margin-top: 5px;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+.move-reason a { color: var(--accent); text-decoration: none; }
+.move-reason a:hover { text-decoration: underline; }
+.move-reason .searching { color: var(--text-faint); font-style: italic; }
+
 /* ---------- Aktien: Inhalt ---------- */
 .stock-empty {
   text-align: center;

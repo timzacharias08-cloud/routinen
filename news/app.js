@@ -27,9 +27,9 @@ const TOPICS = [
 
 // Öffentliche CORS-Proxies (mit Fallback, falls einer ausfällt).
 const PROXIES = [
-  (u) => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u),
   (u) => 'https://corsproxy.io/?url=' + encodeURIComponent(u),
-  (u) => 'https://thingproxy.freeboard.io/fetch/' + u,
+  (u) => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u),
+  (u) => 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(u),
 ];
 
 // Yahoo-Finance-Endpunkte (kostenlos, ohne Key; via Proxy wegen CORS)
@@ -42,7 +42,29 @@ const YQ = {
     return `https://query2.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries/${encodeURIComponent(s)}?type=trailingPeRatio&period1=${now - 400 * 86400}&period2=${now}`;
   },
   news:   (s) => `https://feeds.finance.yahoo.com/rss/2.0/headline?s=${encodeURIComponent(s)}&region=DE&lang=de-DE`,
+  // Batch-Kurse für viele Symbole auf einmal (für Top Moves).
+  // Kommas NICHT vorkodieren – die Proxy-Builder kodieren die ganze URL genau einmal.
+  spark:  (syms) => `https://query1.finance.yahoo.com/v8/finance/spark?symbols=${syms.join(',')}&range=5d&interval=1d`,
 };
+
+// Universum für "Top Moves": DAX 40 + große US-Techwerte
+const MOVERS_UNIVERSE = [
+  ['ADS.DE', 'Adidas'], ['AIR.DE', 'Airbus'], ['ALV.DE', 'Allianz'], ['BAS.DE', 'BASF'],
+  ['BAYN.DE', 'Bayer'], ['BEI.DE', 'Beiersdorf'], ['BMW.DE', 'BMW'], ['CBK.DE', 'Commerzbank'],
+  ['CON.DE', 'Continental'], ['DBK.DE', 'Deutsche Bank'], ['DB1.DE', 'Deutsche Börse'],
+  ['DHL.DE', 'DHL Group'], ['DTE.DE', 'Deutsche Telekom'], ['DTG.DE', 'Daimler Truck'],
+  ['EOAN.DE', 'E.ON'], ['FRE.DE', 'Fresenius'], ['HEI.DE', 'Heidelberg Materials'],
+  ['HEN3.DE', 'Henkel'], ['HNR1.DE', 'Hannover Rück'], ['IFX.DE', 'Infineon'],
+  ['MBG.DE', 'Mercedes-Benz'], ['MRK.DE', 'Merck'], ['MTX.DE', 'MTU Aero Engines'],
+  ['MUV2.DE', 'Münchener Rück'], ['P911.DE', 'Porsche AG'], ['QIA.DE', 'Qiagen'],
+  ['RHM.DE', 'Rheinmetall'], ['RWE.DE', 'RWE'], ['SAP.DE', 'SAP'], ['SHL.DE', 'Siemens Healthineers'],
+  ['SIE.DE', 'Siemens'], ['ENR.DE', 'Siemens Energy'], ['SRT3.DE', 'Sartorius'],
+  ['SY1.DE', 'Symrise'], ['VNA.DE', 'Vonovia'], ['VOW3.DE', 'Volkswagen'], ['ZAL.DE', 'Zalando'],
+  ['AAPL', 'Apple'], ['MSFT', 'Microsoft'], ['NVDA', 'NVIDIA'], ['TSLA', 'Tesla'],
+  ['AMZN', 'Amazon'], ['META', 'Meta'], ['GOOGL', 'Alphabet'],
+];
+const MARKET_INDEX = '^GDAXI';
+const MOVES_COUNT = 6;
 
 const QUICK_STOCKS = [
   ['SAP.DE', 'SAP'], ['SIE.DE', 'Siemens'], ['VOW3.DE', 'Volkswagen'],
@@ -112,7 +134,7 @@ async function fetchViaProxy(url) {
   let lastErr;
   for (const build of PROXIES) {
     try {
-      const res = await fetch(build(url), { cache: 'no-store' });
+      const res = await fetch(build(url), { cache: 'no-store', signal: AbortSignal.timeout(12000) });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const text = await res.text();
       if (text && text.length > 80) return text;
@@ -248,6 +270,7 @@ function switchView(view) {
     startTickerTimer();
   }
   if (view === 'stock') {
+    loadTopMoves();
     if (currentStock && !el.stockContent.dataset.loaded) loadStock(currentStock.symbol, currentStock.name);
   }
 }
@@ -499,6 +522,8 @@ async function loadStock(symbol, name) {
   el.stockContent.dataset.loaded = '1';
   el.stockContent.innerHTML = '<div class="skeletons"><div class="skel"></div><div class="skel"></div><div class="skel"></div></div>';
   markQuickActive();
+  const movesBox = $('topMovesBox');
+  if (movesBox) movesBox.open = false; // Platz für die Analyse machen
 
   // Chart, KGV-Historie und Nachrichten parallel laden – jedes darf einzeln scheitern
   const [chartR, peR, newsR] = await Promise.allSettled([
@@ -806,6 +831,136 @@ function renderStock(symbol, name, points, news, an, meta) {
   `;
 }
 
+// ---------- Aktien: Top Moves ----------
+let movesLoadedAt = 0;
+let movesLoading = false;
+
+async function loadTopMoves(force = false) {
+  if (movesLoading) return;
+  if (!force && movesLoadedAt && Date.now() - movesLoadedAt < 10 * 60 * 1000) return;
+  movesLoading = true;
+  const box = $('topMoves');
+
+  try {
+    // In 15er-Blöcken abfragen – längere URLs lehnen manche Proxies ab (HTTP 400)
+    const syms = MOVERS_UNIVERSE.map(([s]) => s).concat(MARKET_INDEX);
+    const chunks = [];
+    for (let i = 0; i < syms.length; i += 15) chunks.push(syms.slice(i, i + 15));
+    const results = await Promise.allSettled(chunks.map((c) => fetchJsonViaProxy(YQ.spark(c))));
+    const data = {};
+    for (const r of results) if (r.status === 'fulfilled') Object.assign(data, r.value);
+
+    // Tagesbewegung je Symbol: letzter Schlusskurs vs. Vortag
+    const moves = [];
+    let idxChg = null;
+    let lastTradeDay = null;
+    for (const [sym, name] of MOVERS_UNIVERSE.concat([[MARKET_INDEX, 'DAX']])) {
+      const d = data[sym];
+      const closes = (d?.close || []).filter((c) => c != null);
+      if (closes.length < 2) continue;
+      const chg = (closes[closes.length - 1] / closes[closes.length - 2] - 1) * 100;
+      if (sym === MARKET_INDEX) { idxChg = chg; continue; }
+      moves.push({ symbol: sym, name, chg, price: closes[closes.length - 1] });
+      const ts = d?.timestamp;
+      if (ts?.length) {
+        const day = new Date(ts[ts.length - 1] * 1000);
+        if (!lastTradeDay || day > lastTradeDay) lastTradeDay = day;
+      }
+    }
+    if (moves.length < 5) throw new Error('zu wenige Kursdaten');
+
+    moves.sort((a, b) => Math.abs(b.chg) - Math.abs(a.chg));
+    const top = moves.slice(0, MOVES_COUNT);
+    movesLoadedAt = Date.now();
+
+    // Untertitel: Datum des Handelstags (falls nicht heute → "letzter Handelstag")
+    if (lastTradeDay) {
+      const today = new Date();
+      const sameDay = lastTradeDay.toDateString() === today.toDateString();
+      $('movesSub').textContent = (sameDay ? 'heute, ' : 'letzter Handelstag, ')
+        + lastTradeDay.toLocaleDateString('de-DE', { day: 'numeric', month: 'long' });
+    }
+
+    renderTopMoves(top, idxChg);
+
+    // Erklärungen nachladen (parallel, jede darf scheitern)
+    await Promise.allSettled(top.map((m) => explainMove(m, idxChg)));
+  } catch (e) {
+    box.innerHTML = `<div class="moves-error">Top Moves konnten nicht geladen werden (${escapeHtml(e.message)}). Über ⟳ oben erneut versuchen.</div>`;
+    movesLoadedAt = 0;
+  } finally {
+    movesLoading = false;
+  }
+}
+
+function renderTopMoves(top, idxChg) {
+  const box = $('topMoves');
+  const chgCls = (v) => v > 0.05 ? 'up' : v < -0.05 ? 'down' : 'flat';
+  box.innerHTML = top.map((m, i) => `
+    <button class="move-row" data-symbol="${escapeHtml(m.symbol)}" data-name="${escapeHtml(m.name)}" style="animation-delay:${i * 40}ms">
+      <div class="move-head">
+        <span class="move-name">${escapeHtml(m.name)}<span class="sym">${escapeHtml(m.symbol)}</span></span>
+        <span class="chg ${chgCls(m.chg)}">${fmtPct(m.chg)}</span>
+      </div>
+      <div class="move-reason" id="reason-${cssId(m.symbol)}"><span class="searching">Auslöser wird gesucht …</span></div>
+    </button>`).join('')
+    + (idxChg != null ? `<div class="moves-loading">Zum Vergleich: DAX ${fmtPct(idxChg)}</div>` : '');
+}
+
+function cssId(sym) { return sym.replace(/[^a-zA-Z0-9]/g, '_'); }
+
+async function explainMove(m, idxChg) {
+  const target = $('reason-' + cssId(m.symbol));
+  if (!target) return;
+
+  // Symbol-News von Yahoo + Treffer aus den bereits geladenen deutschen Feeds
+  let items = [];
+  try {
+    items = await fetchViaProxy(YQ.news(m.symbol)).then((xml) =>
+      parseFeed(xml, { name: 'Yahoo Finance', cat: 'aktien', prio: 1 }));
+  } catch {}
+  try {
+    const cached = readCache();
+    if (cached) {
+      const token = m.name.toLowerCase();
+      for (const cl of cached.clusters) {
+        const t = (cl.lead.title + ' ' + (cl.lead.desc || '')).toLowerCase();
+        if (t.includes(token)) items.push(cl.lead);
+      }
+    }
+  } catch {}
+
+  // Nur frische Meldungen (letzte 4 Tage); passende Stimmung bevorzugen
+  const fresh = items.filter((n) => n.date && Date.now() - n.date.getTime() < 4 * 24 * 3.6e6);
+  const wanted = m.chg >= 0 ? 'pos' : 'neg';
+  fresh.sort((a, b) => {
+    const sa = sentimentOf(a) === wanted ? 0 : 1;
+    const sb = sentimentOf(b) === wanted ? 0 : 1;
+    return sa - sb || b.date - a.date;
+  });
+  const best = fresh[0];
+
+  const marketNote = idxChg != null && Math.abs(idxChg) >= 0.8 && Math.sign(idxChg) === Math.sign(m.chg)
+    ? ` Der Gesamtmarkt bewegte sich ähnlich (DAX ${fmtPct(idxChg)}) – vermutlich Teil einer breiten Marktbewegung.`
+    : '';
+
+  if (best) {
+    const fits = sentimentOf(best) === wanted;
+    target.innerHTML = `${fits ? 'Möglicher Auslöser' : 'Dazu gefunden'}: „<a href="${escapeHtml(best.link)}" target="_blank" rel="noopener noreferrer">${escapeHtml(truncate(best.title, 110))}</a>“ · ${escapeHtml(best.source)}${best.date ? ' · ' + relTime(best.date) : ''}${marketNote}`;
+  } else if (marketNote) {
+    target.innerHTML = `Kein firmenspezifischer Auslöser in unseren Quellen gefunden.${marketNote}`;
+  } else {
+    target.innerHTML = 'Kein klarer Nachrichten-Auslöser in unseren Quellen gefunden.';
+  }
+}
+
+// Klick auf einen Top Move → volle Analyse
+$('topMoves').addEventListener('click', (e) => {
+  const row = e.target.closest('.move-row');
+  if (!row || e.target.closest('a')) return; // Links in der Erklärung nicht abfangen
+  loadStock(row.dataset.symbol, row.dataset.name);
+});
+
 // ---------- Aktien: Suche & Quick-Picks ----------
 function buildQuickChips() {
   el.stockQuick.innerHTML = '';
@@ -891,7 +1046,10 @@ function closeSettings() { el.overlay.hidden = true; loadNews(); }
 el.refreshBtn.addEventListener('click', () => {
   if (currentView === 'news') loadNews(false);
   else if (currentView === 'ticker') loadTicker();
-  else if (currentView === 'stock' && currentStock) loadStock(currentStock.symbol, currentStock.name);
+  else if (currentView === 'stock') {
+    loadTopMoves(true);
+    if (currentStock) loadStock(currentStock.symbol, currentStock.name);
+  }
 });
 el.settingsBtn.addEventListener('click', openSettings);
 el.closeSettings.addEventListener('click', closeSettings);
