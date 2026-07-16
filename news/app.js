@@ -1253,33 +1253,47 @@ function greetingText() {
 function speakGreeting(force = false) {
   if (!('speechSynthesis' in window)) return;
   if (greeted && !force) return;
-  const u = new SpeechSynthesisUtterance(greetingText());
-  u.lang = 'de-DE';
-  u.rate = 0.98;
-  u.pitch = 1.0;
-  const de = speechSynthesis.getVoices().find((v) => /^de/i.test(v.lang));
-  if (de) u.voice = de;
-  u.onstart = () => { greeted = true; };
-  try { speechSynthesis.cancel(); speechSynthesis.speak(u); } catch {}
+
+  let fired = false;
+  const say = () => {
+    if (fired) return;
+    fired = true;
+    const btn = $('speakBtn');
+    const u = new SpeechSynthesisUtterance(greetingText());
+    u.lang = 'de-DE';
+    u.rate = 0.98;
+    u.pitch = 1.0;
+    const de = speechSynthesis.getVoices().find((v) => /^de/i.test(v.lang));
+    if (de) u.voice = de;
+    u.onstart = () => { greeted = true; btn?.classList.add('speaking'); };
+    u.onend = () => btn?.classList.remove('speaking');
+    u.onerror = () => btn?.classList.remove('speaking');
+    try {
+      // Nur abbrechen, wenn wirklich etwas läuft – cancel() direkt vor speak() lässt
+      // die Ansage in manchen Browsern verstummen.
+      if (speechSynthesis.speaking || speechSynthesis.pending) speechSynthesis.cancel();
+      speechSynthesis.speak(u);
+    } catch {}
+  };
+
+  // Stimmen werden in manchen Browsern erst asynchron geladen
+  if (speechSynthesis.getVoices().length) say();
+  else {
+    speechSynthesis.addEventListener('voiceschanged', say, { once: true });
+    setTimeout(say, 400); // Fallback, falls das Event ausbleibt
+  }
 }
 
 if ('speechSynthesis' in window) {
-  // Stimmen werden teils asynchron geladen – dann erneut versuchen, falls noch nicht begrüßt
-  speechSynthesis.addEventListener('voiceschanged', () => { if (!greeted) speakGreeting(); });
   // Direktversuch beim Öffnen (klappt, wenn der Browser Audio ohne Geste erlaubt)
   setTimeout(() => speakGreeting(), 500);
   // Fallback: spätestens bei der ersten Berührung/Taste begrüßen (umgeht Autoplay-Sperre)
-  const onFirst = () => { speakGreeting(); };
-  window.addEventListener('pointerdown', onFirst, { once: true });
-  window.addEventListener('keydown', onFirst, { once: true });
-
-  // Tippen auf den App-Titel wiederholt die Begrüßung
-  const brand = document.querySelector('.brand');
-  if (brand) {
-    brand.style.cursor = 'pointer';
-    brand.title = 'Begrüßung anhören';
-    brand.addEventListener('click', () => speakGreeting(true));
-  }
+  window.addEventListener('pointerdown', () => speakGreeting(), { once: true });
+  window.addEventListener('keydown', () => speakGreeting(), { once: true });
+  // Lautsprecher-Knopf: jederzeit erneut abspielen
+  $('speakBtn')?.addEventListener('click', (e) => { e.stopPropagation(); speakGreeting(true); });
+} else {
+  $('speakBtn')?.remove(); // Browser kann keine Sprachausgabe
 }
 
 // Service Worker

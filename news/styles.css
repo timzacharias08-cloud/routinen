@@ -114,6 +114,18 @@ body {
 .icon-btn.spin svg { animation: spin 0.8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* Lautsprecher-Knopf, während gesprochen wird */
+.icon-btn.speaking {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  animation: speakPulse 1s ease infinite;
+}
+@keyframes speakPulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--accent-soft); }
+  50% { box-shadow: 0 0 0 6px var(--accent-soft); }
+}
+
 /* ---------- Feed / Views ---------- */
 .feed {
   max-width: 720px;

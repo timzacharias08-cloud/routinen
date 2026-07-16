@@ -1,6 +1,8 @@
 /* Service Worker – App-Shell offline verfügbar machen.
-   Strategie: stale-while-revalidate (sofort aus Cache, im Hintergrund aktualisieren). */
-const CACHE = 'topnews-shell-v4';
+   Strategie: network-first. Die Shell ist klein (~60 KB); Aktualität schlägt hier die
+   Millisekunden aus dem Cache. Verhindert, dass nach einem Update die alte Version
+   ausgeliefert wird (dafür musste man die App sonst zweimal öffnen). */
+const CACHE = 'topnews-shell-v5';
 const SHELL = [
   './',
   './index.html',
@@ -30,16 +32,16 @@ self.addEventListener('fetch', (e) => {
   // News-/Kurs-Requests (Proxies, Yahoo) nie anfassen – immer frisch aus dem Netz
   if (url.origin !== self.location.origin) return;
 
-  // App-Shell: stale-while-revalidate – Cache sofort ausliefern, Netz im Hintergrund
+  // App-Shell: network-first – immer die aktuelle Version, Cache nur als Offline-Fallback
   e.respondWith(
-    caches.open(CACHE).then((cache) =>
-      cache.match(req).then((cached) => {
-        const network = fetch(req).then((res) => {
-          if (res && res.status === 200) cache.put(req, res.clone());
-          return res;
-        }).catch(() => cached || cache.match('./index.html'));
-        return cached || network;
-      })
+    fetch(req).then((res) => {
+      if (res && res.status === 200) {
+        const copy = res.clone();
+        caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
+      }
+      return res;
+    }).catch(() =>
+      caches.match(req).then((hit) => hit || caches.match('./index.html'))
     )
   );
 });
