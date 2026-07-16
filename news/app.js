@@ -608,51 +608,53 @@ function sentimentOf(item) {
   return 'neu';
 }
 
-// ---------- Aktien: Chancen aus den News ableiten ----------
-// Ordnet Meldungen anhand von Stichwörtern konkreten Chancen-Themen zu.
-const OPPORTUNITY_RULES = [
-  { cat: 'auftrag',   words: ['großauftrag', 'milliardenauftrag', 'auftragsplus', 'auftragseingang', 'auftragsbücher', 'neuer auftrag', 'aufträge', 'auftrag von', 'order'],
-    text: 'Neue Aufträge könnten Umsatz und Gewinn ankurbeln.' },
-  { cat: 'ki',        words: ['künstliche intelligenz', 'ki-', 'ki ', ' ai ', 'ai-', 'rechenzentrum', 'cloud', 'halbleiter', 'chip', 'data center'],
-    text: 'Nachfrage rund um KI, Cloud und Chips bietet Wachstumspotenzial.' },
-  { cat: 'upgrade',   words: ['kaufempfehlung', 'hochgestuft', 'hochstufung', 'kursziel erhöht', 'kursziel angehoben', 'outperform', 'overweight', 'upgrade', 'zum kauf'],
-    text: 'Analysten sehen Aufwärtspotenzial (Kaufempfehlung oder höheres Kursziel).' },
-  { cat: 'expansion', words: ['übernahme', 'übernimmt', 'fusion', 'expansion', 'akquisition', 'markteintritt', 'beteiligung', 'investiert', 'baut werk', 'neues werk'],
-    text: 'Wachstum durch Expansion, Investitionen oder Übernahmen möglich.' },
-  { cat: 'zahlen',    words: ['rekord', 'gewinnsprung', 'übertrifft', 'übertroffen', 'umsatzplus', 'milliardengewinn', 'prognose angehoben', 'prognose erhöht', 'starke zahlen', 'gewinn steigt'],
-    text: 'Starke Geschäftszahlen könnten den Kurs weiter stützen.' },
-  { cat: 'kosten',    words: ['sparprogramm', 'sparmaßnahmen', 'sparmassnahmen', 'restrukturierung', 'kostensenkung', 'effizienz', 'stellenabbau', 'umbau', 'sparkurs'],
-    text: 'Kostensenkungen könnten die Gewinnmargen mittelfristig verbessern.' },
-  { cat: 'ausschuett', words: ['dividende', 'aktienrückkauf', 'rückkauf', 'ausschüttung'],
-    text: 'Höhere Ausschüttungen oder Aktienrückkäufe können den Kurs stützen.' },
-  { cat: 'produkt',   words: ['zulassung', 'markteinführung', 'neues modell', 'patent', 'durchbruch', 'studie', 'produktstart', 'neue plattform'],
-    text: 'Neue Produkte oder Zulassungen könnten zusätzliche Umsätze bringen.' },
+// ---------- Aktien: Zukunfts-Argumente aus den News ableiten ----------
+// Jede Regel formuliert, was eine Meldung für die KÜNFTIGE Kursentwicklung bedeutet.
+const PRO_NEWS_RULES = [
+  { words: ['großauftrag', 'milliardenauftrag', 'auftragsplus', 'auftragseingang', 'auftragsbücher', 'neuer auftrag', 'auftrag von'],
+    text: 'Neue Aufträge könnten Umsatz und Gewinn in den kommenden Quartalen steigen lassen.' },
+  { words: ['künstliche intelligenz', 'ki-', 'rechenzentrum', 'cloud', 'halbleiter', 'data center'],
+    text: 'Der Boom bei KI und Cloud könnte dem Unternehmen weiteres Wachstum bringen.' },
+  { words: ['kaufempfehlung', 'hochgestuft', 'hochstufung', 'kursziel erhöht', 'kursziel angehoben', 'outperform', 'overweight', 'zum kauf'],
+    text: 'Analysten erwarten steigende Kurse – solche Empfehlungen ziehen oft weitere Käufer an.' },
+  { words: ['übernahme', 'übernimmt', 'fusion', 'expansion', 'akquisition', 'markteintritt', 'investiert', 'baut werk', 'neues werk'],
+    text: 'Investitionen und Zukäufe könnten das künftige Wachstum absichern.' },
+  { words: ['rekord', 'gewinnsprung', 'übertrifft', 'übertroffen', 'umsatzplus', 'milliardengewinn', 'prognose angehoben', 'prognose erhöht', 'starke zahlen'],
+    text: 'Nach starken Geschäftszahlen trauen Anleger dem Unternehmen künftig mehr zu.' },
+  { words: ['sparprogramm', 'sparmaßnahmen', 'sparmassnahmen', 'restrukturierung', 'kostensenkung', 'sparkurs'],
+    text: 'Das Sparprogramm könnte die Gewinne in den nächsten Quartalen verbessern.' },
+  { words: ['dividende', 'aktienrückkauf', 'rückkauf', 'ausschüttung'],
+    text: 'Dividenden oder Aktienrückkäufe dürften den Kurs künftig stützen.' },
+  { words: ['zulassung', 'markteinführung', 'patent', 'durchbruch', 'produktstart', 'neues modell'],
+    text: 'Neue Produkte oder Zulassungen könnten bald zusätzliche Umsätze bringen.' },
+];
+const CON_NEWS_RULES = [
+  { words: ['gewinnwarnung', 'prognose gesenkt', 'senkt prognose', 'senkt die prognose'],
+    text: 'Nach einer Gewinnwarnung folgen erfahrungsgemäß oft weitere Abwärtskorrekturen.' },
+  { words: ['abstufung', 'abgestuft', 'herabgestuft', 'herabstufung', 'gestrichene kaufempfehlung', 'kaufempfehlung gestrichen', 'kursziel gesenkt', 'verkaufsempfehlung', 'underperform'],
+    text: 'Analysten haben ihr Urteil gesenkt – das dürfte weitere Käufer abschrecken.' },
+  { words: ['klage', 'ermittlung', 'skandal', 'strafe', 'lawsuit', 'investigation', 'kartell'],
+    text: 'Rechtliche Risiken könnten den Kurs noch länger belasten.' },
+  { words: ['einbruch', 'bricht ein', 'nachfrageschwäche', 'absatzflaute', 'gewinn fällt', 'umsatz fällt', 'verlust', 'schwaches quartal'],
+    text: 'Die operative Schwäche könnte anhalten und weiter auf dem Kurs lasten.' },
+  { words: ['streik', 'rückruf', 'produktionsstopp', 'lieferprobleme'],
+    text: 'Produktionsprobleme oder Streiks könnten kurzfristig Umsatz kosten.' },
+  { words: ['konkurrenz', 'wettbewerbsdruck', 'verliert marktanteile', 'marktanteil'],
+    text: 'Wachsende Konkurrenz könnte Marktanteile und Gewinnmargen drücken.' },
 ];
 
-function deriveOpportunities(news, an) {
-  const used = new Set();
+// Findet pro Regel höchstens einen Treffer in den Meldungen → {text, item}
+function matchNewsRules(news, rules, max = 3) {
   const out = [];
-  for (const it of news) {
-    if (out.length >= 4) break;
-    const t = (it.title + ' ' + (it.desc || '')).toLowerCase();
-    for (const rule of OPPORTUNITY_RULES) {
-      if (used.has(rule.cat)) continue;
+  for (const rule of rules) {
+    if (out.length >= max) break;
+    for (const it of news) {
+      const t = (it.title + ' ' + (it.desc || '')).toLowerCase();
       if (rule.words.some((w) => t.includes(w))) {
-        used.add(rule.cat);
         out.push({ text: rule.text, item: it });
         break;
       }
     }
-  }
-  // Chancen aus Kurs-/Bewertungslage (nicht an eine einzelne Meldung gebunden)
-  if (out.length < 4 && an.chg6m <= -15) {
-    out.push({ text: `Nach dem Kursrückgang von ${fmtPct(an.chg6m)} in 6 Monaten ist die Aktie günstiger bewertet – für langfristig Orientierte eine mögliche Einstiegschance.` });
-  }
-  if (out.length < 4 && an.mom30 > 5 && an.nowP > an.sma50) {
-    out.push({ text: `Der intakte Aufwärtstrend (Momentum ${fmtPct(an.mom30)}) könnte sich fortsetzen.` });
-  }
-  if (out.length < 4 && an.peNow != null && an.pePast != null && an.peNow < an.pePast * 0.95) {
-    out.push({ text: `Das gesunkene KGV (von ${fmtNum(an.pePast)} auf ${fmtNum(an.peNow)}) macht die Aktie relativ günstiger als zuvor.` });
   }
   return out;
 }
@@ -787,52 +789,80 @@ function analyzeStock(points, peSeries, news) {
     pePastDate = bestE.t;
   }
 
-  // Nachrichten-Stimmung
+  // Stimmung je Meldung markieren (für die Nachrichtenliste)
   let posN = 0, negN = 0;
-  const pros = [], cons = [];
   for (const n of news) {
-    const s = sentimentOf(n);
-    n.senti = s;
-    if (s === 'pos') { posN++; if (pros.length < 3) pros.push(`Positive Meldung: „${truncate(n.title, 90)}“`); }
-    if (s === 'neg') { negN++; if (cons.length < 3) cons.push(`Negative Meldung: „${truncate(n.title, 90)}“`); }
+    n.senti = sentimentOf(n);
+    if (n.senti === 'pos') posN++;
+    if (n.senti === 'neg') negN++;
   }
 
-  // Technische Pro/Kontra
-  if (nowP > sma50) pros.push('Kurs liegt über dem 50-Tage-Durchschnitt (kurzfristiger Aufwärtstrend)');
-  else cons.push('Kurs liegt unter dem 50-Tage-Durchschnitt (kurzfristiger Abwärtstrend)');
-  if (mom30 > 3) pros.push(`Positives Momentum: ${fmtPct(mom30)} in den letzten ~30 Tagen`);
-  else if (mom30 < -3) cons.push(`Negatives Momentum: ${fmtPct(mom30)} in den letzten ~30 Tagen`);
-  if (chg6m > 15) pros.push(`Starker 6-Monats-Trend: ${fmtPct(chg6m)}`);
-  else if (chg6m < -15) cons.push(`Schwacher 6-Monats-Trend: ${fmtPct(chg6m)}`);
-  if (peNow != null && peNow > 40) cons.push(`Hohes KGV von ${fmtNum(peNow)} – die Aktie ist sportlich bewertet`);
-  if (peNow != null && peNow > 0 && peNow < 12) pros.push(`Niedriges KGV von ${fmtNum(peNow)} – vergleichsweise günstige Bewertung`);
+  // Zukunfts-Argumente sammeln: {text, item?, w} – w = Gewicht für den Gesamtscore
+  const pros = [], cons = [];
+  matchNewsRules(news, PRO_NEWS_RULES).forEach((f) => pros.push({ ...f, w: 2 }));
+  matchNewsRules(news, CON_NEWS_RULES).forEach((f) => cons.push({ ...f, w: 2 }));
 
-  // Gesamtscore → Tendenz
-  const newsScore = clampNum(posN - negN, -4, 4);
-  let techScore = 0;
-  techScore += nowP > sma50 ? 1 : -1;
-  if (mom30 > 3) techScore += 1; else if (mom30 < -3) techScore -= 1;
-  const total = newsScore + techScore;
-
-  let dir, label, icon;
-  if (total >= 2) { dir = 'up'; label = 'Tendenz: eher steigend'; icon = '📈'; }
-  else if (total <= -2) { dir = 'down'; label = 'Tendenz: eher fallend'; icon = '📉'; }
-  else { dir = 'flat'; label = 'Tendenz: neutral / seitwärts'; icon = '➖'; }
-  const conf = Math.abs(total) >= 3 ? 'mittlere Sicherheit' : 'geringe Sicherheit';
-
-  // Begründung
-  const parts = [];
-  if (posN || negN) parts.push(`In den aktuellen Meldungen überwiegen ${posN > negN ? 'positive' : posN < negN ? 'negative' : 'weder positive noch negative'} Signale (${posN} positiv, ${negN} negativ)`);
-  else parts.push('Es wurden kaum aussagekräftige Meldungen zu dieser Aktie gefunden');
-  parts.push(`der Kurs notiert ${nowP > sma50 ? 'über' : 'unter'} dem 50-Tage-Durchschnitt`);
-  parts.push(`das Momentum der letzten ~30 Tage beträgt ${fmtPct(mom30)}`);
-  if (peNow != null && pePast != null) {
-    const dirWord = peNow > pePast ? 'gestiegen' : 'gefallen';
-    parts.push(`das KGV ist von ca. ${fmtNum(pePast)} (${shortDate(pePastDate)}) auf aktuell ca. ${fmtNum(peNow)} ${dirWord}, die Aktie ist also ${peNow > pePast ? 'teurer' : 'günstiger'} bewertet als zuvor`);
+  // Trend: laufende Trends setzen sich statistisch öfter fort, als dass sie drehen.
+  // Kurzfrist (1 Monat) und längerfristig (6 Monate) getrennt bewerten, damit eine
+  // kleine Delle in einem intakten Aufwärtstrend nicht als "Absturz" gilt.
+  const uptrend = nowP > sma50;
+  if (uptrend && mom30 > 2) {
+    pros.push({ text: `Der Aufwärtstrend ist intakt (${fmtPct(mom30)} im letzten Monat) – laufende Trends setzen sich öfter fort, als dass sie drehen.`, w: 1.5 });
+  } else if (!uptrend && mom30 < -2 && chg6m < 0) {
+    cons.push({ text: `Der Abwärtstrend ist ungebrochen (${fmtPct(mom30)} im letzten Monat) – ohne frische Kaufargumente dürfte die Schwäche zunächst anhalten.`, w: 1.5 });
+  } else if (!uptrend && mom30 < -2) {
+    cons.push({ text: `Kurzfristig hat der Kurs nachgegeben (${fmtPct(mom30)} im letzten Monat) – das kann eine Pause im Aufwärtstrend sein, birgt aber Rückschlagrisiko.`, w: 0.7 });
+  } else if (uptrend) {
+    pros.push({ text: 'Der Kurs hält sich über dem 50-Tage-Durchschnitt – die Käufer haben derzeit leicht die Oberhand.', w: 0.8 });
+  } else {
+    cons.push({ text: 'Der Kurs notiert unter dem 50-Tage-Durchschnitt – die Verkäufer haben derzeit leicht die Oberhand.', w: 0.8 });
   }
-  const reason = parts.join('; ') + '.';
 
-  return { dir, label, icon, conf, reason, pros, cons, posN, negN,
+  // Längerfristige Richtung (6 Monate) zählt ebenfalls
+  if (chg6m > 12) {
+    pros.push({ text: `Auf 6-Monats-Sicht liegt die Aktie klar vorn (${fmtPct(chg6m)}) – längerfristige Stärke zieht oft weitere Anleger an.`, w: 1 });
+  } else if (chg6m < -12) {
+    cons.push({ text: `Auf 6-Monats-Sicht hat die Aktie deutlich verloren (${fmtPct(chg6m)}) – verlorenes Vertrauen kehrt meist nur langsam zurück.`, w: 1 });
+  }
+
+  // Boden-Suche nahe dem 52-Wochen-Tief
+  if (!uptrend && chg6m < 0 && (nowP / lo52 - 1) * 100 < 8) {
+    cons.push({ text: 'Die Aktie notiert nahe ihrem 52-Wochen-Tief und hat noch keinen Boden gefunden – viele Anleger warten ab, bis die Talfahrt stoppt.', w: 1 });
+  }
+
+  // Bewertung: entscheidet mit, wie viel Luft nach oben/unten bleibt
+  if (peNow != null) {
+    if (peNow > 40) {
+      cons.push({ text: `Das hohe KGV von ${fmtNum(peNow)} lässt wenig Raum für Enttäuschungen – schlechte Nachrichten würden dann doppelt durchschlagen.`, w: 1 });
+    } else if (peNow > 0 && peNow < 12) {
+      pros.push({ text: `Das niedrige KGV von ${fmtNum(peNow)} begrenzt das Rückschlagrisiko – viel Pessimismus ist bereits eingepreist.`, w: 1 });
+    }
+    if (pePast != null && peNow < pePast * 0.7 && peNow <= 30) {
+      pros.push({ text: `Die Bewertung ist deutlich gesunken (KGV ${fmtNum(pePast)} → ${fmtNum(peNow)}) – auf diesem Niveau steigen die Chancen auf eine Erholung.`, w: 0.8 });
+    }
+  }
+
+  // Stärkste Argumente zuerst anzeigen
+  pros.sort((a, b) => b.w - a.w);
+  cons.sort((a, b) => b.w - a.w);
+
+  // Gesamtscore → Ausblick
+  const score = pros.reduce((s, f) => s + f.w, 0) - cons.reduce((s, f) => s + f.w, 0);
+  let dir, label, icon, lead;
+  if (score >= 1.5) {
+    dir = 'up'; label = 'Ausblick: eher steigend'; icon = '📈';
+    lead = 'Die Argumente für steigende Kurse überwiegen derzeit.';
+  } else if (score <= -1.5) {
+    dir = 'down'; label = 'Ausblick: eher fallend'; icon = '📉';
+    lead = 'Die Argumente für fallende Kurse überwiegen derzeit.';
+  } else {
+    dir = 'flat'; label = 'Ausblick: unklar / seitwärts'; icon = '➖';
+    lead = 'Die Argumente halten sich in etwa die Waage – keine klare Richtung erkennbar.';
+  }
+  if (!news.length) lead += ' Hinweis: Zu dieser Aktie wurden aktuell kaum Meldungen gefunden, die Einschätzung stützt sich vor allem auf Kursverlauf und Bewertung.';
+  const conf = Math.abs(score) >= 3.5 ? 'mittlere Sicherheit' : 'geringe Sicherheit';
+
+  return { dir, label, icon, conf, lead, pros, cons, posN, negN,
            sma50, mom30, chg6m, chg1y, hi52, lo52, peNow, pePast, pePastDate, peLastDate, peSeries, nowP };
 }
 
@@ -904,9 +934,11 @@ function renderStock(symbol, name, points, news, an, meta) {
     </div>
     ${peTrend}
     <p class="kgv-note">
-      Das KGV (Kurs-Gewinn-Verhältnis) ist seit ${shortDate(an.pePastDate)} ${an.peNow > an.pePast ? 'gestiegen – die Aktie ist <strong>teurer</strong> bewertet' : 'gefallen – die Aktie ist <strong>günstiger</strong> bewertet'} als zuvor.
-      Ein hohes KGV heißt: Anleger zahlen viel pro Euro Gewinn.<br/>
-      <em>Berichtete Werte von Yahoo Finance (Stand ${shortDate(an.peLastDate)}); „aktuell" anhand des Kurses fortgeschrieben.</em>
+      Die Aktie ist aktuell <strong>${an.peNow > an.pePast ? 'teurer' : 'günstiger'}</strong> bewertet als im ${shortDate(an.pePastDate)}.
+      ${an.peNow > an.pePast
+        ? 'Für die Zukunft heißt das: Die Erwartungen sind hoch – Enttäuschungen könnten den Kurs stärker treffen.'
+        : 'Für die Zukunft heißt das: Es ist bereits viel Pessimismus eingepreist – positive Überraschungen hätten Luft nach oben.'}<br/>
+      <em>KGV = Kurs-Gewinn-Verhältnis. Berichtete Werte von Yahoo Finance (Stand ${shortDate(an.peLastDate)}); „aktuell" anhand des Kurses fortgeschrieben.</em>
     </p>` : `
     <p class="kgv-note">Für diese Aktie sind gerade keine KGV-Daten verfügbar (z. B. bei Verlust oder wenn der Kennzahlen-Dienst nicht antwortet). Chart und Nachrichten-Analyse funktionieren trotzdem.</p>`;
 
@@ -916,19 +948,17 @@ function renderStock(symbol, name, points, news, an, meta) {
       <span>${escapeHtml(n.title)}
         <span class="snews-meta">${escapeHtml(n.source)}${n.date ? ' · ' + relTime(n.date) : ''}</span>
       </span>
-    </a></li>`).join('') : '<li class="none" style="list-style:none;color:var(--text-faint);font-size:0.85rem;">Keine aktuellen Meldungen gefunden.</li>';
+    </a></li>`).join('') : '<li class="none" style="list-style:none;color:var(--text-faint);font-size:0.85rem;">Keine aktuellen Meldungen zu dieser Aktie gefunden.</li>';
 
-  const liHtml = (arr, none) => arr.length
-    ? arr.map((p) => `<li>${escapeHtml(p)}</li>`).join('')
-    : `<li class="none">${none}</li>`;
+  // Argument-Listen für den Ausblick (mit Quelle, wenn aus einer Meldung abgeleitet)
+  const factorHtml = (arr, none) => arr.length ? arr.map((f) => `
+    <li>${escapeHtml(f.text)}
+      ${f.item ? `<a class="opp-src" href="${escapeHtml(f.item.link)}" target="_blank" rel="noopener noreferrer">↳ ${escapeHtml(truncate(f.item.title, 85))} · ${escapeHtml(f.item.source)}</a>` : ''}
+    </li>`).join('') : `<li class="none">${none}</li>`;
 
-  const opps = deriveOpportunities(news, an);
-  const oppHtml = opps.length ? opps.map((o) => `
-    <li>
-      <span class="opp-text">${escapeHtml(o.text)}</span>
-      ${o.item ? `<a class="opp-src" href="${escapeHtml(o.item.link)}" target="_blank" rel="noopener noreferrer">↳ ${escapeHtml(truncate(o.item.title, 90))} · ${escapeHtml(o.item.source)}</a>` : ''}
-    </li>`).join('')
-    : '<li class="opp-none">Aus den aktuellen Meldungen lässt sich derzeit keine klare Chance ableiten – beobachte die Nachrichtenlage.</li>';
+  const sentiLine = news.length
+    ? `${an.posN} positiv · ${an.negN} negativ · ${news.length - an.posN - an.negN} neutral`
+    : '';
 
   el.stockContent.innerHTML = `
     <div class="stock-block" style="animation-delay:0ms">
@@ -942,20 +972,16 @@ function renderStock(symbol, name, points, news, an, meta) {
           <span class="chg ${chgCls(dayChg)}">${fmtPct(dayChg)} heute</span>
         </div>
       </div>
+      <div class="chart-wrap">${buildChartSVG(points)}</div>
       <div class="stat-row">
+        <div class="stat"><div class="k">1 Monat</div><div class="v ${chgCls(an.mom30)}">${fmtPct(an.mom30)}</div></div>
         <div class="stat"><div class="k">6 Monate</div><div class="v ${chgCls(an.chg6m)}">${fmtPct(an.chg6m)}</div></div>
         <div class="stat"><div class="k">1 Jahr</div><div class="v ${chgCls(an.chg1y)}">${fmtPct(an.chg1y)}</div></div>
-        <div class="stat"><div class="k">52W-Hoch</div><div class="v">${fmtNum(an.hi52, 2)}</div></div>
-        <div class="stat"><div class="k">52W-Tief</div><div class="v">${fmtNum(an.lo52, 2)}</div></div>
       </div>
     </div>
 
-    <div class="stock-block" style="animation-delay:60ms">
-      <div class="block-title">Kursverlauf · 1 Jahr</div>
-      <div class="chart-wrap">${buildChartSVG(points)}</div>
-    </div>
-
-    <div class="stock-block" style="animation-delay:120ms">
+    <div class="stock-block" style="animation-delay:70ms">
+      <div class="block-title">Ausblick – steigt oder fällt die Aktie?</div>
       <div class="verdict ${an.dir}">
         <div class="verdict-icon">${an.icon}</div>
         <div>
@@ -963,41 +989,35 @@ function renderStock(symbol, name, points, news, an, meta) {
           <span class="conf">${an.conf} · automatische Einschätzung</span>
         </div>
       </div>
-      <p class="verdict-reason"><strong>Begründung:</strong> ${an.reason}</p>
-    </div>
-
-    <div class="stock-block" style="animation-delay:180ms">
-      <div class="block-title">Pro & Kontra</div>
+      <p class="verdict-reason">${an.lead}</p>
       <div class="procon">
         <div class="procon-col pro">
-          <h4>✅ Spricht für steigende Kurse</h4>
-          <ul>${liHtml(an.pros, 'Keine positiven Signale gefunden.')}</ul>
+          <h4>✅ Was für steigende Kurse spricht</h4>
+          <ul>${factorHtml(an.pros, 'Derzeit keine überzeugenden Argumente für steigende Kurse gefunden.')}</ul>
         </div>
         <div class="procon-col con">
-          <h4>⛔ Spricht für fallende Kurse</h4>
-          <ul>${liHtml(an.cons, 'Keine negativen Signale gefunden.')}</ul>
+          <h4>⛔ Was für fallende Kurse spricht</h4>
+          <ul>${factorHtml(an.cons, 'Derzeit keine klaren Warnsignale gefunden.')}</ul>
         </div>
       </div>
     </div>
 
-    <div class="stock-block" style="animation-delay:210ms">
-      <div class="block-title">🚀 Chancen aus den News</div>
-      <ul class="opp-list">${oppHtml}</ul>
-      <p class="opp-hint">Automatisch aus Nachrichten-Stichwörtern und der Kurslage abgeleitet – eine Chance ist keine Garantie, dass sie eintritt.</p>
-    </div>
-
-    <div class="stock-block" style="animation-delay:240ms">
-      <div class="block-title">KGV – was ist passiert?</div>
+    <div class="stock-block" style="animation-delay:140ms">
+      <div class="block-title">Bewertung & Kennzahlen</div>
       ${kgvHtml}
+      <div class="stat-row" style="margin-top:12px">
+        <div class="stat"><div class="k">52W-Hoch</div><div class="v">${fmtNum(an.hi52, 2)}</div></div>
+        <div class="stat"><div class="k">52W-Tief</div><div class="v">${fmtNum(an.lo52, 2)}</div></div>
+      </div>
     </div>
 
-    <div class="stock-block" style="animation-delay:300ms">
-      <div class="block-title">Was ist passiert? · Aktuelle Meldungen</div>
+    <div class="stock-block" style="animation-delay:210ms">
+      <div class="block-title">Nachrichtenlage${sentiLine ? ` <span class="senti-line">${sentiLine}</span>` : ''}</div>
       <ul class="snews-list">${newsHtml}</ul>
     </div>
 
     <div class="disclaimer">
-      ⚠️ <strong>Keine Anlageberatung:</strong> Diese Einschätzung wird automatisch aus Schlagworten in Nachrichten und einfacher Chart-Statistik berechnet. Sie kann falsch liegen und ersetzt keine eigene Recherche oder professionelle Beratung.
+      ⚠️ <strong>Keine Anlageberatung:</strong> Der Ausblick wird automatisch aus Nachrichten, Trend und Bewertung abgeleitet. Er kann falsch liegen und ersetzt keine eigene Recherche oder professionelle Beratung.
     </div>
   `;
 }

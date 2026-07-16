@@ -489,6 +489,16 @@ body {
   color: var(--text-faint);
   margin-bottom: 12px;
 }
+.senti-line {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 600;
+  color: var(--text-dim);
+  float: right;
+}
+.stock-head { margin-bottom: 12px; }
+.verdict-reason strong { color: var(--text); }
+.procon { margin-top: 14px; }
 
 .chart-wrap svg { width: 100%; height: auto; display: block; }
 
